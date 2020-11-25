@@ -1,7 +1,7 @@
 ---
 title: "Emmaus Client Analysis"
 author: "Peter Kirgis"
-date: "11/18/2020"
+date: "11/24/2020"
 output: html_document
 ---
 ##Introduction
@@ -16,12 +16,16 @@ library(reshape2)
 library(DBI)
 library(broom)
 library(eeptools)
+library(aod)
+library(forcats)
+library(jtools)
+library(kableExtra)
 ```
 
 ##Part 1: Collect data from SQL Databases
 
 ```{r connect to SQL, results='hide'}
-path.to.db <- paste0("/Users/peterkirgis/Documents/EmmausData/")
+path.to.db <- paste0("/Users/peterkirgis/Documents/DataAnalytics/A+A_Project_draft/")
 con <- dbConnect(RSQLite::SQLite(),
                  dbname=paste0(path.to.db,"MitchsFY2020.db"))
 dbListTables(con)
@@ -158,6 +162,11 @@ client19_exit <- client19_entry_exit %>%
 client_exit_19_20 <- union(client_exit, client19_exit)
 distinct_clients_19_20 <- client_exit_19_20 %>%
   distinct(PersonalID, .keep_all = TRUE)
+
+client_19_20 <- union(client_list, client_list19)
+client_19_20 <- client_19_20 %>%
+  distinct(PersonalID, DataCollectionStage, .keep_all = TRUE) %>%
+  filter(DataCollectionStage != 5)
 ```
 
 ##Part 3: Create tables and charts to show breakdowns along key variables
@@ -170,7 +179,7 @@ probs <- c(0.1, 0.25, 0.5, 0.75, 0.9)
 quantiles <- quantile(onentry$LengthOfStay, prob=probs)
 df$quant <- factor(findInterval(df$x,quantiles))
 ggplot(onentry, aes(x=LengthOfStay)) + geom_bar() +
-scale_x_binned() + ylab("Freqency") + xlab("Length of Stay") + ggtitle("Histogram of Length of Stay, Mitch's Place 2020") + theme_bw() + 
+scale_x_binned() + ylab("Freqency") + xlab("Length of Stay") + ggtitle("Histogram of Length of Stay, Mitch's Place 2020") + theme_classic() + 
   theme(plot.title = element_text(hjust = 0.5))
 
 #2019
@@ -180,11 +189,10 @@ probs <- c(0.1, 0.25, 0.5, 0.75, 0.9)
 quantiles <- quantile(onentry2$LengthOfStay, prob=probs)
 df$quant <- factor(findInterval(df$x,quantiles))
 ggplot(onentry2, aes(x=LengthOfStay)) + geom_bar() +
-scale_x_binned() + ylab("Freqency") + xlab("Length of Stay") + ggtitle("Histogram of Length of Stay, Mitch's Place 2019") + theme_bw() + 
+scale_x_binned() + ylab("Freqency") + xlab("Length of Stay") + ggtitle("Histogram of Length of Stay, Mitch's Place 2019") + theme_classic() + 
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-These histograms show that the distribution of stays among Emmaus clients stayed relatively constant from 2019 to 2020. It also shows that the distributions are bimodal, where the majority of clients are either staying for a short period of time--a matter of days or weeks--or are staying much longer, with many staying the entire year at the shelter.
 
 ```{r by race}
 #2020
@@ -211,7 +219,13 @@ ggplot(race.df, aes(x="", y=per, fill=Race)) +
   coord_polar("y", start=0) + theme_void() + ggtitle("Emmaus clients by Race, 2019") + theme(plot.title = element_text(hjust = 0.5)) + geom_text(size=2, aes(x=1.8, y = per, label=label), position = position_stack(vjust=0.5))
 ```
 
-These two pie charts show the racial breakdown of clients served by Emmaus in the years 2019 and 2020. The population served is predominantely white, with the highest minority population being African Americans, hovering just below 10%.
+```{r}
+tb <- table(client_19_20$client_disability_score, client_19_20$DataCollectionStage)
+disabilityscore.df <- as.data.frame(tb, stringsAsFactors = FALSE)
+names(disabilityscore.df) <- c("Disability_Score", "DataCollectionStage", "Frequency")
+ggplot(disabilityscore.df, aes(x=Disability_Score, y=Frequency, fill=DataCollectionStage)) + geom_col(position = 'dodge') + theme_bw() + geom_text(aes(label=Frequency), vjust=-0.5, color="black",
+            position = position_dodge(0.9), size=3.5) + ggtitle("Disability Score on Entry and Exit, Mitch's Place") + theme(plot.title = element_text(hjust = 0.5))
+```
 
 ```{r race and outcomes}
 #tabulation of race with outcomes
@@ -229,44 +243,44 @@ distinct_clients_19_20 %>%
   scale_x_continuous(label=percent)
 ```
 
-This chart displays the percent of each racial demographic of clients that successfully exited the program into temporary or permanent housing. The data shows Hawaiian Islanders to have the highest success rate, at 50%, although with only 6 total clients, while White clients were successful only around 10% of the time. As the regression below shows, however, none of these differences are close to significant.
 ```{r race on outcome}
 distinct_clients_19_20 <- distinct_clients_19_20 %>% 
   mutate(race_fct = fct_reorder(race,Exit_to_housing,mean)) %>%
   mutate(Gender_fct = fct_reorder(Gender,Exit_to_housing,mean)) %>%
   mutate(Ethnicity_fct = fct_reorder(Ethnicity,Exit_to_housing,mean))
 glmrace <- glm(Exit_to_housing ~ race_fct, data=distinct_clients_19_20, family="binomial")
-summary(glmrace)
+summ(glmrace)
 ```
 ##Part 4: Logitistic Regression with controls
 ```{r regression}
-glm1 <- glm(Exit_to_housing ~ age + MonthsHomelessPastThreeYears + TimesHomelessPastThreeYears + LengthOfStay + Ethnicity_fct + DomesticViolenceVictim + client_disability_score, data=distinct_clients_19_20, family="binomial")
-summary(glm1)
+glm1 <- glm(Exit_to_housing ~ age + MonthsHomelessPastThreeYears + TimesHomelessPastThreeYears + LengthOfStay + Gender_fct + DomesticViolenceVictim + client_disability_score, data=distinct_clients_19_20, family="binomial")
+summ(glm1)
 
 1-pchisq(356.89-327.33, df=7)
 
-rb.fit <- tidy(glm1) %>% 
+rb.fit <- tidy(glm1) %>%
   mutate(exp_estimate = exp(estimate),
          logodds = exp_estimate/(1+exp_estimate),
          lb = exp(estimate - 2*std.error),
          ub = exp(estimate + 2*std.error))
+
 ```
 
-Out of the combined exit data from 2019 and 2020, I constructed a logit model to assess the correlations between demographic and individual characteristics and particular outcomes upon exiting the program. I generated a binary variable that took the value 1 if a client was placed into any form of transitional or permanent housing by Emmaus, and 0 otherwise. The regression results show that two variables, age and domestic violence victim, were significantly correlated with this outcome variable. For each additional year of the client at exit, they were 2% more likely to be placed into housing. If a client was a victim of domestic violence, this decreased their likelihood of being placed into housing by 80%. The number of times homeless in the last three years is approaching significance, with a p-value of 0.06, which supports evidence that each instance of recidivism in the homeless population has an effect on the likelihood of reaching stable housing.
-
-The dramatic finding regarding domestic violence shocked me here. The cross tabulation below adds to the model by showing that of the 70 distinct individuals placed into housing between 2019 and 2020 from Emmaus, only 3 of these were clients with a history of domestic violence abuse.
-```{r domestic violence}
+```{r}
 tbl <- table(distinct_clients_19_20$DomesticViolenceVictim, distinct_clients_19_20$Exit_to_housing)
 rownames(tbl) <- c("No Domestic Violence","Domestic Violence Victim")
-colnames(tbl) <- c("No Placed into Housing","Placed into Housing")
+colnames(tbl) <- c("Not Placed into Housing","Placed into Housing")
+knitr::kable(tbl)
+tbl <- table(distinct_clients_19_20$Gender, distinct_clients_19_20$DomesticViolenceVictim)
+colnames(tbl) <- c("No Domestic Violence","Domestic Violence Victim")
 knitr::kable(tbl)
 ```
 ##Part 5: APPENDIX
-EnrollmentID: specific to an enrollment date and client, used to merge data together
-PersonalID: distinct to the client, NOT the enrollment date
-DataCollectionStage: when the data was collected, encoded 1 for entry and 3 for exit
-LengthOfStay: calculated in months
-LivingSituation: where are they coming from, numeric matches to types of locations (not used for this analysis)
-Destionation: where did the client exit to, see code for translation to place names
-DomesticViolenceVictim: variable that takes 1 if client is victim, 0 otherwise
-client_disability_score: a variable I created using an aggregate for each client of mental and physcial disabilities, as well as substance abuse. Each yes answer to a question in the disability survey gains the client a 1, and the disability score is the cumulative sum of all the yes answers. Thus, a higher disability score means more issues for the client.
+*EnrollmentID: specific to an enrollment date and client, used to merge data together
+*PersonalID: distinct to the client, NOT the enrollment date
+*DataCollectionStage: when the data was collected, encoded 1 for entry and 3 for exit
+*LengthOfStay: calculated in months
+*LivingSituation: where are they coming from, numeric matches to types of locations (not used for this analysis)
+*Destionation: where did the client exit to, see code for translation to place names
+*DomesticViolenceVictim: variable that takes 1 if client is victim, 0 otherwise
+*client_disability_score: a variable I created using an aggregate for each client of mental and physcial disabilities, as well as substance abuse. Each yes answer to a question in the disability survey gains the client a 1, and the disability score is the cumulative sum of all the yes answers. Thus, a higher disability score means more issues for the client.
