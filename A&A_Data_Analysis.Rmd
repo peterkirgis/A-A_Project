@@ -1,0 +1,272 @@
+---
+title: "Emmaus Client Analysis"
+author: "Peter Kirgis"
+date: "11/18/2020"
+output: html_document
+---
+##Introduction
+
+This data comes from the non-profit Emmaus, inc. Emmaus is a local homeless shelter and affordable housing developer in Haverhill, MA. I created two datasets, one from 2019 and one from 2020, out of a dozen csvs that contained entry and exit data at the client level for one of the programs at Emmaus, an individual homeless shelter. The appendix at the end contains information about some variables of interest. I was looking to do a few things with the data. First, I wanted to get a sense of the population Emmaus was serving over these years, especially racial demographics. Second, I was interested in finding out what contributes to a client successfully exiting the program into some form of stable, independent housing. Understanding the variables that contribute to these outcomes is key to understanding how Emmaus can target individuals that are most vulnerable while they are at the shelter. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(scales)
+library(reshape2)
+library(DBI)
+library(broom)
+library(eeptools)
+```
+
+##Part 1: Collect data from SQL Databases
+
+```{r connect to SQL, results='hide'}
+path.to.db <- paste0("/Users/peterkirgis/Documents/EmmausData/")
+con <- dbConnect(RSQLite::SQLite(),
+                 dbname=paste0(path.to.db,"MitchsFY2020.db"))
+dbListTables(con)
+client_list <- tbl(con, "client_entry_exit") %>%
+  collect
+
+con2 <- dbConnect(RSQLite::SQLite(),
+                 dbname=paste0(path.to.db,"MitchsFY2019.db"))
+dbListTables(con2)
+client_list19 <- tbl(con2, "client_entry_exit") %>%
+  collect
+```
+
+##Part 2: Clean up categorical fields, manipulate tables for analysis
+
+```{r clean up fields}
+#convert demographics into categorical variables
+
+client_list$race <- "White"
+client_list$race[client_list$BlackAfAmerican==1] <- "African American"
+client_list$race[client_list$Asian==1] <- "Asian"
+client_list$race[client_list$NativeHIOtherPacific==1] <- "Hawaiian Islander"
+client_list$race[client_list$AmIndAKNative==1] <- "Native American"
+
+client_list$Gender[client_list$Gender==1] <- "Male"
+client_list$Gender[client_list$Gender==0] <- "Female"
+client_list$Gender[client_list$Gender==2] <- "Trans Female"
+
+client_list$Ethnicity[client_list$Ethnicity==1] <- "Hispanic"
+client_list$Ethnicity[client_list$Ethnicity==0] <- "Non-Hispanic"
+
+#create age variable and convert destination to categorical
+
+client_list$DOB <- as.Date(client_list$DOB)
+client_list$EntryDate <- as.Date(client_list$EntryDate)
+client_list$age <- floor(age_calc(client_list$DOB, enddate=client_list$EntryDate, units = "years"))
+
+client_list$Destination_1 <- ""
+client_list$Destination_1[client_list$Destination == 13] <- "Staying with Friends, temporary"
+client_list$Destination_1[client_list$Destination == 12] <- "Staying with Family, temporary"
+client_list$Destination_1[client_list$Destination == 1] <- "Emergency Shelter or Paid Motel"
+client_list$Destination_1[client_list$Destination == 6] <- "Hospital, non-psychiatric"
+client_list$Destination_1[client_list$Destination == 20] <- "Rental by Client, other subsidy"
+client_list$Destination_1[client_list$Destination == 16] <- "Place Not Meant for Habitation"
+client_list$Destination_1[client_list$Destination == 10] <- "Rental by Client, no subsidy"
+client_list$Destination_1[client_list$Destination == 17] <- "Other"
+client_list$Destination_1[client_list$Destination == 7] <- "Prison or Juvenile Detention Facility"
+client_list$Destination_1[client_list$Destination == 22] <- "Staying with Family, permanent"
+client_list$Destination_1[client_list$Destination == 23] <- "Staying with Friends, permanent"
+client_list$Destination_1[client_list$Destination == 25] <- "Nursing Home"
+client_list$Destination_1[client_list$Destination == 19] <- "Rental by Client, VASH Subsidy"
+client_list$Destination_1[client_list$Destination == 18] <- "Safe Haven"
+client_list$Destination_1[client_list$Destination == 2] <- "Transitional Housing"
+client_list$Destination_1[client_list$Destination == 4] <- "Psychiatric Hospital"
+client_list$Destination_1[client_list$Destination == 5] <- "Substance Abuse Treatment"
+
+#carry out the same operations for 2019 data
+
+client_list19$race <- "White"
+client_list19$race[client_list19$BlackAfAmerican==1] <- "African American"
+client_list19$race[client_list19$Asian==1] <- "Asian"
+client_list19$race[client_list19$NativeHIOtherPacific==1] <- "Hawaiian Islander"
+client_list19$race[client_list19$AmIndAKNative==1] <- "Native American"
+
+client_list19$Gender[client_list19$Gender==1] <- "Male"
+client_list19$Gender[client_list19$Gender==0] <- "Female"
+client_list19$Gender[client_list19$Gender==2] <- "Trans Female"
+
+client_list19$Ethnicity[client_list19$Ethnicity==1] <- "Hispanic"
+client_list19$Ethnicity[client_list19$Ethnicity==0] <- "Non-Hispanic"
+
+client_list19$DOB <- as.Date(client_list19$DOB)
+client_list19$EntryDate <- as.Date(client_list19$EntryDate)
+client_list19$age <- floor(age_calc(client_list19$DOB, enddate=client_list19$EntryDate, units = "years"))
+
+client_list19$Destination_1 <- ""
+client_list19$Destination_1[client_list19$Destination == 13] <- "Staying with Friends, temporary"
+client_list19$Destination_1[client_list19$Destination == 12] <- "Staying with Family, temporary"
+client_list19$Destination_1[client_list19$Destination == 1] <- "Emergency Shelter or Paid Motel"
+client_list19$Destination_1[client_list19$Destination == 6] <- "Hospital, non-psychiatric"
+client_list19$Destination_1[client_list19$Destination == 20] <- "Rental by Client, other subsidy"
+client_list19$Destination_1[client_list19$Destination == 16] <- "Place Not Meant for Habitation"
+client_list19$Destination_1[client_list19$Destination == 10] <- "Rental by Client, no subsidy"
+client_list19$Destination_1[client_list19$Destination == 17] <- "Other"
+client_list19$Destination_1[client_list19$Destination == 7] <- "Prison or Juvenile Detention Facility"
+client_list19$Destination_1[client_list19$Destination == 22] <- "Staying with Family, permanent"
+client_list19$Destination_1[client_list19$Destination == 23] <- "Staying with Friends, permanent"
+client_list19$Destination_1[client_list19$Destination == 25] <- "Nursing Home"
+client_list19$Destination_1[client_list19$Destination == 19] <- "Rental by Client, VASH Subsidy"
+client_list19$Destination_1[client_list19$Destination == 18] <- "Safe Haven"
+client_list19$Destination_1[client_list19$Destination == 2] <- "Transitional Housing"
+client_list19$Destination_1[client_list19$Destination == 4] <- "Psychiatric Hospital"
+client_list19$Destination_1[client_list19$Destination == 5] <- "Substance Abuse Treatment"
+
+#create table with just data for clients who both entered and exitited
+
+client_entry_exit <- client_list %>%
+  filter(Destination != "NA")
+
+client19_entry_exit <- client_list19 %>%
+  filter(Destination != "NA")
+
+#code variable for clients who exited into housing
+
+client_entry_exit$Exit_to_housing <- 0
+client_entry_exit$Exit_to_housing[client_entry_exit$Destination_1 == "Rental by Client, other subsidy"] <- 1
+client_entry_exit$Exit_to_housing[client_entry_exit$Destination_1 == "Rental by Client, no subsidy"] <- 1
+client_entry_exit$Exit_to_housing[client_entry_exit$Destination_1 == "Rental by Client, VASH Subsidy"] <- 1
+client_entry_exit$Exit_to_housing[client_entry_exit$Destination_1 == "Transitional Housing"] <- 1
+
+client19_entry_exit$Exit_to_housing <- 0
+client19_entry_exit$Exit_to_housing[client19_entry_exit$Destination_1 == "Rental by Client, other subsidy"] <- 1
+client19_entry_exit$Exit_to_housing[client19_entry_exit$Destination_1 == "Rental by Client, no subsidy"] <- 1
+client19_entry_exit$Exit_to_housing[client19_entry_exit$Destination_1 == "Rental by Client, VASH Subsidy"] <- 1
+client19_entry_exit$Exit_to_housing[client19_entry_exit$Destination_1 == "Transitional Housing"] <- 1
+
+# create tables for data on entries
+onentry <- client_list %>%
+  filter(DataCollectionStage == 1)
+
+onentry2 <- client_list19 %>%
+  filter(DataCollectionStage == 1)
+
+# create table only for data on exits
+
+client_exit <- client_entry_exit %>%
+  filter(DataCollectionStage==3)
+
+client19_exit <- client19_entry_exit %>%
+  filter(DataCollectionStage==3)
+
+#create table with exit data combined for two years
+
+client_exit_19_20 <- union(client_exit, client19_exit)
+distinct_clients_19_20 <- client_exit_19_20 %>%
+  distinct(PersonalID, .keep_all = TRUE)
+```
+
+##Part 3: Create tables and charts to show breakdowns along key variables
+
+```{r Histogram of Length of Stay}
+#2020
+dens <- density(onentry$LengthOfStay)
+df <- data.frame(x=dens$x, y=dens$y)
+probs <- c(0.1, 0.25, 0.5, 0.75, 0.9)
+quantiles <- quantile(onentry$LengthOfStay, prob=probs)
+df$quant <- factor(findInterval(df$x,quantiles))
+ggplot(onentry, aes(x=LengthOfStay)) + geom_bar() +
+scale_x_binned() + ylab("Freqency") + xlab("Length of Stay") + ggtitle("Histogram of Length of Stay, Mitch's Place 2020") + theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#2019
+dens <- density(onentry2$LengthOfStay)
+df <- data.frame(x=dens$x, y=dens$y)
+probs <- c(0.1, 0.25, 0.5, 0.75, 0.9)
+quantiles <- quantile(onentry2$LengthOfStay, prob=probs)
+df$quant <- factor(findInterval(df$x,quantiles))
+ggplot(onentry2, aes(x=LengthOfStay)) + geom_bar() +
+scale_x_binned() + ylab("Freqency") + xlab("Length of Stay") + ggtitle("Histogram of Length of Stay, Mitch's Place 2019") + theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+These histograms show that the distribution of stays among Emmaus clients stayed relatively constant from 2019 to 2020. It also shows that the distributions are bimodal, where the majority of clients are either staying for a short period of time--a matter of days or weeks--or are staying much longer, with many staying the entire year at the shelter.
+
+```{r by race}
+#2020
+tb <- table(onentry$race)
+tb
+race.df <- as.data.frame(tb, stringsAsFactors = FALSE)
+names(race.df) <- c("Race", "Frequency")
+race.df <- race.df %>%
+  mutate(per=Frequency/sum(Frequency))
+race.df$label <- scales::percent(race.df$per)
+ggplot(race.df, aes(x="", y=per, fill=Race)) +
+  geom_bar(stat="identity", width=1, color='white') +
+  coord_polar("y", start=0) + theme_void() + ggtitle("Emmaus clients by Race, 2020") +theme(plot.title = element_text(hjust = 0.5)) + geom_text(size=2, aes(x=1.8, y = per, label=label), position = position_stack(vjust=0.5))
+#2019
+tb <- table(onentry2$race)
+tb
+race.df <- as.data.frame(tb, stringsAsFactors = FALSE)
+names(race.df) <- c("Race", "Frequency")
+race.df <- race.df %>%
+  mutate(per=Frequency/sum(Frequency))
+race.df$label <- scales::percent(race.df$per)
+ggplot(race.df, aes(x="", y=per, fill=Race)) +
+  geom_bar(stat="identity", width=1, color='white') +
+  coord_polar("y", start=0) + theme_void() + ggtitle("Emmaus clients by Race, 2019") + theme(plot.title = element_text(hjust = 0.5)) + geom_text(size=2, aes(x=1.8, y = per, label=label), position = position_stack(vjust=0.5))
+```
+
+These two pie charts show the racial breakdown of clients served by Emmaus in the years 2019 and 2020. The population served is predominantely white, with the highest minority population being African Americans, hovering just below 10%.
+
+```{r race and outcomes}
+#tabulation of race with outcomes
+
+table(distinct_clients_19_20$race, distinct_clients_19_20$Exit_to_housing)
+
+distinct_clients_19_20 %>%
+  group_by(race) %>%
+  summarize(mean_exit_housing = mean(Exit_to_housing)) %>%
+  mutate(race = fct_reorder(race,mean_exit_housing)) %>%
+  ggplot(aes(x=mean_exit_housing, y=race)) + 
+  geom_point() + 
+  theme_minimal() + 
+  labs(x="Successful Exit Rate", y="Race") +
+  scale_x_continuous(label=percent)
+```
+
+This chart displays the percent of each racial demographic of clients that successfully exited the program into temporary or permanent housing. The data shows Hawaiian Islanders to have the highest success rate, at 50%, although with only 6 total clients, while White clients were successful only around 10% of the time. As the regression below shows, however, none of these differences are close to significant.
+```{r race on outcome}
+distinct_clients_19_20 <- distinct_clients_19_20 %>% 
+  mutate(race_fct = fct_reorder(race,Exit_to_housing,mean)) %>%
+  mutate(Gender_fct = fct_reorder(Gender,Exit_to_housing,mean)) %>%
+  mutate(Ethnicity_fct = fct_reorder(Ethnicity,Exit_to_housing,mean))
+glmrace <- glm(Exit_to_housing ~ race_fct, data=distinct_clients_19_20, family="binomial")
+summary(glmrace)
+```
+##Part 4: Logitistic Regression with controls
+```{r regression}
+glm1 <- glm(Exit_to_housing ~ age + MonthsHomelessPastThreeYears + TimesHomelessPastThreeYears + LengthOfStay + Ethnicity_fct + DomesticViolenceVictim + client_disability_score, data=distinct_clients_19_20, family="binomial")
+summary(glm1)
+
+1-pchisq(356.89-327.33, df=7)
+
+rb.fit <- tidy(glm1) %>% 
+  mutate(exp_estimate = exp(estimate),
+         logodds = exp_estimate/(1+exp_estimate),
+         lb = exp(estimate - 2*std.error),
+         ub = exp(estimate + 2*std.error))
+```
+
+Out of the combined exit data from 2019 and 2020, I constructed a logit model to assess the correlations between demographic and individual characteristics and particular outcomes upon exiting the program. I generated a binary variable that took the value 1 if a client was placed into any form of transitional or permanent housing by Emmaus, and 0 otherwise. The regression results show that two variables, age and domestic violence victim, were significantly correlated with this outcome variable. For each additional year of the client at exit, they were 2% more likely to be placed into housing. If a client was a victim of domestic violence, this decreased their likelihood of being placed into housing by 80%. The number of times homeless in the last three years is approaching significance, with a p-value of 0.06, which supports evidence that each instance of recidivism in the homeless population has an effect on the likelihood of reaching stable housing.
+
+The dramatic finding regarding domestic violence shocked me here. The cross tabulation below adds to the model by showing that of the 70 distinct individuals placed into housing between 2019 and 2020 from Emmaus, only 3 of these were clients with a history of domestic violence abuse.
+```{r domestic violence}
+tbl <- table(distinct_clients_19_20$DomesticViolenceVictim, distinct_clients_19_20$Exit_to_housing)
+rownames(tbl) <- c("No Domestic Violence","Domestic Violence Victim")
+colnames(tbl) <- c("No Placed into Housing","Placed into Housing")
+knitr::kable(tbl)
+```
+##Part 5: APPENDIX
+EnrollmentID: specific to an enrollment date and client, used to merge data together
+PersonalID: distinct to the client, NOT the enrollment date
+DataCollectionStage: when the data was collected, encoded 1 for entry and 3 for exit
+LengthOfStay: calculated in months
+LivingSituation: where are they coming from, numeric matches to types of locations (not used for this analysis)
+Destionation: where did the client exit to, see code for translation to place names
+DomesticViolenceVictim: variable that takes 1 if client is victim, 0 otherwise
+client_disability_score: a variable I created using an aggregate for each client of mental and physcial disabilities, as well as substance abuse. Each yes answer to a question in the disability survey gains the client a 1, and the disability score is the cumulative sum of all the yes answers. Thus, a higher disability score means more issues for the client.
